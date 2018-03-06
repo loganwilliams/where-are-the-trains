@@ -28,7 +28,7 @@ class TrainMap extends Component {
   }
 
   updateJson() {
-    fetch('http://localhost:8080/live')
+    fetch('http://fog.today/nyc/api/live')
     .then(result => result.json())
     .then((resultJson) => {
       if (this.state.drawnTrains) {
