@@ -31,7 +31,7 @@ func currentTrainsHandler(w http.ResponseWriter, r *http.Request) {
     } else {
         f, err := os.Open("trains.json")
         if err != nil {
-            log.Fatal("Error openiing trains.json for read: ", err)
+            log.Fatal("Error opening trains.json for read: ", err)
         }
         bytes, err := ioutil.ReadAll(f)
         json = string(bytes)
@@ -48,6 +48,6 @@ func currentTrainsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-    http.HandleFunc("/live", currentTrainsHandler)
+    http.HandleFunc("/nyc/api/live", currentTrainsHandler)
     log.Fatal(http.ListenAndServe(":8080", nil))
 }
