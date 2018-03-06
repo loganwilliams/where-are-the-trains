@@ -1,0 +1,19 @@
+# docker-compose config
+
+version: '2'
+services:
+  server:
+    build:
+      context: ./server/
+    ports:
+      - "8080:8080"
+
+  client:
+    build:
+      context: ./client/
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+    links:
+      - "server:server"
