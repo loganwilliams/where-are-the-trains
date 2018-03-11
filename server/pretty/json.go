@@ -5,6 +5,7 @@ import (
 	"bytes"
 )
 
+// Pretty-print JSON string.
 func Json(in string) string {
     var out bytes.Buffer
     err := json.Indent(&out, []byte(in), "", "\t")
