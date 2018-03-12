@@ -2,12 +2,12 @@ FROM node:9.4.0-alpine
 
 WORKDIR /client
 
-COPY package*.json ./
+COPY yarn.lock ./
 
-RUN npm install -qy
+RUN yarn
 
 COPY . .
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["yarn", "start"]

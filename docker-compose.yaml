@@ -2,18 +2,18 @@
 
 version: '2'
 services:
-  server:
+  devserver:
     build:
       context: ./server/
     ports:
       - "8080:8080"
 
-  client:
+  devclient:
     build:
       context: ./client/
     ports:
       - "3000:3000"
     depends_on:
-      - server
+      - devserver
     links:
-      - "server:server"
+      - "devserver:devserver"
