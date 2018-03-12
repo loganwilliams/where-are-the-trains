@@ -5,9 +5,7 @@ import (
   "time"
   "net/http"
   "bytes"
-  "os"
   "encoding/csv"
-  "bufio"
   "io"
   "strconv"
   "strings"
@@ -36,14 +34,13 @@ type Train struct {
   Direction string
 }
 
+// A cache, to avoid constantly reading the stop list from disk.
 type StopLocationCache struct {
   stopLocations map[string]Location
   sync.Mutex
 }
 
-var (
-  c *StopLocationCache
-)
+var c *StopLocationCache
 
 func GetLiveGeoJSON() []byte {
   geometry := makeGeoJSON(GetLiveTrains())
@@ -70,8 +67,6 @@ func GetLiveTrains() []Train {
   }
 
   var trains []Train
-  now := time.Now()
-  cutoff := now.Add(-10.0*time.Minute)
 
   for _, url := range datafeeds {
     transit, err := getGTFS(url, 3)
@@ -79,20 +74,30 @@ func GetLiveTrains() []Train {
       log.Println("Error getting GTFS feed: ", err)
     }
 
-    for _, entity := range transit.Entity {
-      train, err := trainPositionFromTripUpdate(entity)
+    trains = append(trains, trainList(transit, time.Now())...)
+  }
 
-      if err == nil {
-        // Only include trains that have moved in the last 10 minutes, are reporting times in the present/past
-        // and have a line associated with them.
-        if train.Timestamp.After(cutoff) && train.Timestamp.Before(now) && train.Line != "" {
-          trains = append(trains, *train)
-        }
+  return trains  
+}
+
+// Returns a list of trains from an unmarshalled protobuf that have had an update within
+// 10 minutes of the time "now".
+func trainList(transit *transit_realtime.FeedMessage, now time.Time) (trains []Train) {
+  cutoff := now.Add(-10.0*time.Minute)
+
+  for _, entity := range transit.Entity {
+    train, err := trainPositionFromTripUpdate(entity)
+
+    if err == nil {
+      // Only include trains that have moved in the last 10 minutes, are reporting times in the present/past
+      // and have a line associated with them.
+      if train.Timestamp.After(cutoff) && train.Timestamp.Before(now) && train.Line != "" {
+        trains = append(trains, *train)
       }
     }
   }
 
-  return trains  
+  return
 }
 
 // trainPositionFromTripUpdate takes a GTFS protobuf entity and returns a Train object. If there is no
@@ -141,13 +146,9 @@ func getStopLocations() map[string]Location {
 
   c.stopLocations = make(map[string]Location)
 
-  stops, error := os.Open("gtfsjson/stops.txt")
+  stops := stopLocationsCSV()
 
-  if error != nil {
-    log.Fatal("Error opening stops.txt: ", error)
-  }
-
-  reader := csv.NewReader(bufio.NewReader(stops))
+  reader := csv.NewReader(strings.NewReader(stops))
   line, error := reader.Read()
 
   for {
