@@ -12,6 +12,8 @@ import (
   "strconv"
   "strings"
   "errors"
+  "fmt"
+  "sync"
 
   "github.com/loganwilliams/where-are-the-trains/server/transit_realtime"
   "github.com/golang/protobuf/proto"
@@ -34,16 +36,28 @@ type Train struct {
   Direction string
 }
 
-var (
+type StopLocationCache struct {
   stopLocations map[string]Location
+  sync.Mutex
+}
+
+var (
+  c *StopLocationCache
 )
 
-// GetTrains() returns a GeoJSON []byte object with the most recent position of all trains in the NYC Subway, as
+func GetLiveGeoJSON() []byte {
+  geometry := makeGeoJSON(GetLiveTrains())
+  rawJSON, _ := geometry.MarshalJSON()
+
+  return rawJSON
+}
+
+// GetLiveTrains() returns a GeoJSON []byte object with the most recent position of all trains in the NYC Subway, as
 // reported by the MTA's GTFS feed.
-func GetTrains() []byte {
+func GetLiveTrains() []Train {
   // The MTA has several different endpoints for different lines. My API key is in here, but the abuse potential
   // seems low enough that I'm okay with that.
-  datafeeds := [9](string){
+  datafeeds := [](string){
     "http://datamine.mta.info/mta_esi.php?key=5a28db44c9856c30f98eeac4cd09a345&feed_id=1",  // 123456S
     "http://datamine.mta.info/mta_esi.php?key=5a28db44c9856c30f98eeac4cd09a345&feed_id=26", // ACE
     "http://datamine.mta.info/mta_esi.php?key=5a28db44c9856c30f98eeac4cd09a345&feed_id=16", // NQRW
@@ -59,8 +73,11 @@ func GetTrains() []byte {
   now := time.Now()
   cutoff := now.Add(-10.0*time.Minute)
 
-  for i := 0; i < 9; i++ {
-    transit := getGTFS(datafeeds[i])    
+  for _, url := range datafeeds {
+    transit, err := getGTFS(url, 3)
+    if err != nil {
+      log.Println("Error getting GTFS feed: ", err)
+    }
 
     for _, entity := range transit.Entity {
       train, err := trainPositionFromTripUpdate(entity)
@@ -69,40 +86,37 @@ func GetTrains() []byte {
         // Only include trains that have moved in the last 10 minutes, are reporting times in the present/past
         // and have a line associated with them.
         if train.Timestamp.After(cutoff) && train.Timestamp.Before(now) && train.Line != "" {
-          trains = append(trains, train)
+          trains = append(trains, *train)
         }
       }
     }
   }
 
-  geometry := makeGeoJSON(trains)
-  rawJSON, _ := geometry.MarshalJSON()
-
-  return rawJSON
+  return trains  
 }
 
 // trainPositionFromTripUpdate takes a GTFS protobuf entity and returns a Train object. If there is no
 // trip update in the GTFS entity, it returns an empty Train and an error.
-func trainPositionFromTripUpdate(entity *transit_realtime.FeedEntity) (Train, error) {
-  if entity.TripUpdate != nil {
-    tripId := entity.GetTripUpdate().GetTrip().GetTripId()
-    direction := directionFromId(tripId)      
-
-    routeId := entity.GetTripUpdate().GetTrip().GetRouteId()
-    stopTimes := entity.GetTripUpdate().GetStopTimeUpdate();
-    timestamp := time.Unix(int64(stopTimes[0].GetArrival().GetTime()), 0)
-    stopId := stopTimes[0].GetStopId()
-
-    return Train{
-      TrainId: tripId, 
-      Line: routeId, 
-      StopId: stopId, 
-      Timestamp: timestamp, 
-      Direction: direction}, nil
-
-  } else {
-    return Train{}, errors.New("No trip update in entity.")
+func trainPositionFromTripUpdate(entity *transit_realtime.FeedEntity) (*Train, error) {
+  if entity.TripUpdate == nil {
+    return &Train{}, errors.New("No trip update in entity.")
   }
+
+  tripId := entity.GetTripUpdate().GetTrip().GetTripId()
+  direction := directionFromId(tripId)      
+
+  routeId := entity.GetTripUpdate().GetTrip().GetRouteId()
+  stopTimes := entity.GetTripUpdate().GetStopTimeUpdate();
+  timestamp := time.Unix(int64(stopTimes[0].GetArrival().GetTime()), 0)
+  stopId := stopTimes[0].GetStopId()
+
+  return &Train{
+    TrainId: tripId, 
+    Line: routeId, 
+    StopId: stopId, 
+    Timestamp: timestamp, 
+    Direction: direction}, nil
+
 }
 
 // Using the Trip ID, return a direction.
@@ -114,11 +128,18 @@ func directionFromId(id string) (direction string) {
 
 // stopLocations reads the MTA stop locations from a file ("stops.txt") and constructs a map.
 func getStopLocations() map[string]Location {
-  if stopLocations != nil {
-    return stopLocations
+  if c == nil {
+    c = &StopLocationCache{}
   }
 
-  stopLocations = make(map[string]Location)
+  c.Lock()
+  defer c.Unlock()
+
+  if c.stopLocations != nil {
+    return c.stopLocations
+  }
+
+  c.stopLocations = make(map[string]Location)
 
   stops, error := os.Open("gtfsjson/stops.txt")
 
@@ -141,10 +162,10 @@ func getStopLocations() map[string]Location {
     latitude, _ := strconv.ParseFloat(line[4], 64)
     longitude, _ := strconv.ParseFloat(line[5], 64)
 
-    stopLocations[line[0]] = Location{Latitude: latitude, Longitude: longitude}
+    c.stopLocations[line[0]] = Location{Latitude: latitude, Longitude: longitude}
   }
 
-  return stopLocations
+  return c.stopLocations
 }
 
 // makeGeoJSON takes a list of Train objects and constructs a GeoJSON FeatureCollection.
@@ -169,20 +190,27 @@ func makeGeoJSON(trains []Train) *geojson.FeatureCollection {
 }
 
 // getGTFS downloads a GTFS url from the MTA and unmarshals the protobuf.
-func getGTFS(url string) *transit_realtime.FeedMessage {
-  resp, _ := http.Get(url)
+func getGTFS(url string, retries int) (*transit_realtime.FeedMessage, error) {
+  if retries <= 0 {
+    return nil, fmt.Errorf("giving up on url %q", url)
+  }
+
+  resp, err := http.Get(url)
   defer resp.Body.Close()
+
+  if err != nil {
+   fmt.Printf("failed to fetch for url %q", url)
+  }
 
   buf := new(bytes.Buffer)
   buf.ReadFrom(resp.Body)
   gtfs := buf.Bytes()
 
-
   transit := &transit_realtime.FeedMessage{}
   if err := proto.Unmarshal(gtfs, transit); err != nil {
       log.Println("Failed to parse GTFS feed", err)
-      return getGTFS(url)
+      return getGTFS(url, retries-1)
   }
 
-  return transit
+  return transit, nil
 }
