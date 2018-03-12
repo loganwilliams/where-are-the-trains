@@ -1,9 +1,12 @@
-import React, { Component } from 'react';
-import './TrainMap.css';
+import React, { Component } from "react";
+import "./TrainMap.css";
 import ReactMapboxGl, { GeoJSONLayer } from "react-mapbox-gl";
 
+// This is public on the deployed version already, so I don't see a risk to publishing it here. If you fork/deploy this
+// please change it to your own token!
 const Map = ReactMapboxGl({
-  accessToken: "pk.eyJ1IjoibG9nYW53IiwiYSI6IlQzWHJqc3cifQ.KY3j-syHXeYmI69JmLqGqQ"
+  accessToken:
+    "pk.eyJ1IjoibG9nYW53IiwiYSI6IlQzWHJqc3cifQ.KY3j-syHXeYmI69JmLqGqQ"
 });
 
 class TrainMap extends Component {
@@ -18,96 +21,124 @@ class TrainMap extends Component {
     };
   }
 
-  componentWillMount() {
+  componentWillMount = () => {
     this.updateJson();
     this.interpolate();
-  }
+  };
 
-  onStyleLoad(map, e) {
-    this.setState( {map: map} );
-  }
+  onStyleLoad = (map, e) => {
+    this.setState({ map: map });
+  };
 
-  updateJson() {
-    fetch('http://fog.today/nyc/api/live')
-    .then(result => result.json())
-    .then((resultJson) => {
-      if (this.state.drawnTrains) {
-        var oldPositionByTrainId = this.state.newPositionByTrainId;
-        var newPositionByTrainId = {};
+  updateJson = () => {
+    fetch("http://fog.today/nyc/api/live")
+      .then(result => result.json())
+      .then(resultJson => {
+        if (this.state.drawnTrains) {
+          // Copy the last train map to a new variable and make a new Train ID -> Train location map.
+          let oldPositionByTrainId = this.state.newPositionByTrainId;
+          let newPositionByTrainId = {};
 
-        for (var i = 0; i < resultJson.features.length; i++) {
-            newPositionByTrainId[resultJson.features[i].properties.id] = resultJson.features[i].geometry.coordinates.slice();
+          for (let i = 0; i < resultJson.features.length; i++) {
+            newPositionByTrainId[
+              resultJson.features[i].properties.id
+            ] = resultJson.features[i].geometry.coordinates.slice();
+          }
+
+          this.setState({
+            drawnTrains: this.state.currentTrains,
+            oldPositionByTrainId: oldPositionByTrainId,
+            newPositionByTrainId: newPositionByTrainId,
+            currentTrains: resultJson,
+            interpolant: 0.005
+          });
+
+          // This is the first time that we have recieved any train data.
+        } else {
+          // Make a map of Train ID -> Train location, for interpolation.
+          let newPositionByTrainId = {};
+
+          for (let i = 0; i < resultJson.features.length; i++) {
+            newPositionByTrainId[
+              resultJson.features[i].properties.id
+            ] = resultJson.features[i].geometry.coordinates.slice();
+          }
+
+          this.setState({
+            drawnTrains: resultJson,
+            currentTrains: resultJson,
+            newPositionByTrainId: newPositionByTrainId
+          });
         }
-
-        this.setState({
-          drawnTrains: this.state.currentTrains,
-          oldPositionByTrainId: oldPositionByTrainId,
-          newPositionByTrainId: newPositionByTrainId,
-          currentTrains: resultJson
-        });
-
-        this.interpolant = 0.005;
-      } else {
-        // this is the first time that we have recieved any train data
-        var newPositionByTrainId = {};
-
-        for (var i = 0; i < resultJson.features.length; i++) {
-            newPositionByTrainId[resultJson.features[i].properties.id] = resultJson.features[i].geometry.coordinates.slice();
-        }
-
-        this.setState({
-          drawnTrains: resultJson,
-          currentTrains: resultJson,
-          newPositionByTrainId: newPositionByTrainId
-        });
-      }
-    });
+      });
 
     // update the train positions every 10s
-    window.setTimeout(this.updateJson.bind(this), 10000);
-  }
+    window.setTimeout(this.updateJson, 10000);
+  };
 
-  componentWillUpdate(nextProps, nextState) {
+  componentWillUpdate = (nextProps, nextState) => {
     const map = nextState.map;
     const trains = nextState.drawnTrains;
 
     // this is necessary in order for the trains to update position.
     if (map) {
-      map.getSource('trains').setData(trains);
+      map.getSource("trains").setData(trains);
     }
-  }
+  };
 
   // interpolate each trains position from its old coordinates to its new ones, so that they move smoothly.
-  interpolate() {
+  interpolate = () => {
     if (this.state.oldPositionByTrainId) {
-
       var interpolatedTrains = this.state.currentTrains;
 
       for (var i = 0; i < this.state.currentTrains.features.length; i++) {
-        if (this.state.currentTrains.features[i].properties.id in this.state.oldPositionByTrainId) {
-          if (interpolatedTrains.features[i].geometry.coordinates[0] != this.state.oldPositionByTrainId[this.state.currentTrains.features[i].properties.id][0]) {
-            interpolatedTrains.features[i].geometry.coordinates[0] = this.state.newPositionByTrainId[this.state.currentTrains.features[i].properties.id][0] * this.interpolant + this.state.oldPositionByTrainId[this.state.currentTrains.features[i].properties.id][0] * (1.0 - this.interpolant)
-            interpolatedTrains.features[i].geometry.coordinates[1] = this.state.newPositionByTrainId[this.state.currentTrains.features[i].properties.id][1] * this.interpolant + this.state.oldPositionByTrainId[this.state.currentTrains.features[i].properties.id][1] * (1.0 - this.interpolant)
+        if (
+          this.state.currentTrains.features[i].properties.id in
+          this.state.oldPositionByTrainId
+        ) {
+          if (
+            interpolatedTrains.features[i].geometry.coordinates[0] !==
+            this.state.oldPositionByTrainId[
+              this.state.currentTrains.features[i].properties.id
+            ][0]
+          ) {
+            interpolatedTrains.features[i].geometry.coordinates[0] =
+              this.state.newPositionByTrainId[
+                this.state.currentTrains.features[i].properties.id
+              ][0] *
+                this.state.interpolant +
+              this.state.oldPositionByTrainId[
+                this.state.currentTrains.features[i].properties.id
+              ][0] *
+                (1.0 - this.state.interpolant);
+            interpolatedTrains.features[i].geometry.coordinates[1] =
+              this.state.newPositionByTrainId[
+                this.state.currentTrains.features[i].properties.id
+              ][1] *
+                this.state.interpolant +
+              this.state.oldPositionByTrainId[
+                this.state.currentTrains.features[i].properties.id
+              ][1] *
+                (1.0 - this.state.interpolant);
           }
         }
       }
 
       this.setState({
-        drawnTrains: interpolatedTrains
+        drawnTrains: interpolatedTrains,
+        interpolant:
+          this.state.interpolant + 0.01 > 1.0
+            ? 1.0
+            : this.state.interpolant + 0.01
       });
-
-      this.interpolant += 0.01;
-      if (this.interpolant > 1.0) {
-        this.interpolant = 1.0;
-      }
     }
 
-    requestAnimationFrame(this.interpolate.bind(this));
-  }
+    requestAnimationFrame(this.interpolate);
+  };
 
-  render() {
+  render = () => {
     var geojson = [];
-    
+
     var lineColors = {
       'circle-stroke-width': [
         'match', ['get', 'direction'],
@@ -145,15 +176,18 @@ class TrainMap extends Component {
         '6X', '#00933c',
         '7', '#b933ad',
         '7X', '#b933ad',
-         '#808183' ]};
+         '#808183' ]
+      };
 
     if (this.state.drawnTrains) {
-      geojson = <GeoJSONLayer
+      geojson = (
+        <GeoJSONLayer
           id="trains"
           data={this.state.drawnTrains}
-          circleLayout={{ visibility: 'visible'}}
+          circleLayout={{ visibility: "visible" }}
           circlePaint={lineColors}
         />
+      );
     }
 
     return (
@@ -164,11 +198,12 @@ class TrainMap extends Component {
           width: "100vw"
         }}
         center={this.state.center}
-        onStyleLoad={this.onStyleLoad.bind(this)}>
+        onStyleLoad={this.onStyleLoad}
+      >
         {geojson}
       </Map>
     );
-  }
+  };
 }
 
 export default TrainMap;
