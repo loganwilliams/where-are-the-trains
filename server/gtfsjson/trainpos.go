@@ -77,7 +77,7 @@ func GetLiveTrains() []Train {
     trains = append(trains, trainList(transit, time.Now())...)
   }
 
-  return trains  
+  return trains
 }
 
 // Returns a list of trains from an unmarshalled protobuf that have had an update within
@@ -108,18 +108,23 @@ func trainPositionFromTripUpdate(entity *transit_realtime.FeedEntity) (*Train, e
   }
 
   tripId := entity.GetTripUpdate().GetTrip().GetTripId()
-  direction := directionFromId(tripId)      
+  direction := directionFromId(tripId)
 
   routeId := entity.GetTripUpdate().GetTrip().GetRouteId()
-  stopTimes := entity.GetTripUpdate().GetStopTimeUpdate();
+  stopTimes := entity.GetTripUpdate().GetStopTimeUpdate()
+
+  if (len(stopTimes) == 0) {
+    return nil, fmt.Errorf("No stop times in train.")
+  }
+
   timestamp := time.Unix(int64(stopTimes[0].GetArrival().GetTime()), 0)
   stopId := stopTimes[0].GetStopId()
 
   return &Train{
-    TrainId: tripId, 
-    Line: routeId, 
-    StopId: stopId, 
-    Timestamp: timestamp, 
+    TrainId: tripId,
+    Line: routeId,
+    StopId: stopId,
+    Timestamp: timestamp,
     Direction: direction}, nil
 
 }
